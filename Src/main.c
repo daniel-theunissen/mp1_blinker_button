@@ -54,7 +54,6 @@
 void Init_GPIO(void);
 void Init_Interrupts(void);
 void Init_Timer(void);
-void Init_SysTick(void);
 int Read_Button(void);
 void LED_On(void);
 void LED_Off(void);
