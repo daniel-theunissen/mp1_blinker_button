@@ -18,12 +18,157 @@
 
 #include <stdint.h>
 
+#define RCC_AHB1ENR *((volatile uint32_t *) 0x40023830)
+#define RCC_APB1ENR *((volatile uint32_t *) 0x40023840)
+#define RCC_APB2ENR *((volatile uint32_t *) 0x40023844)
+#define SYSCFG_EXTICR4 *((volatile uint32_t *) 0x40013814)
+#define NVIC_ISER0 *((volatile uint32_t *) 0xE000E100)
+#define NVIC_ISER1 *((volatile uint32_t *) 0xE000E104)
+#define EXTI_IMR *((volatile uint32_t *) 0x40013C00)
+#define EXTI_FTSR *((volatile uint32_t *) 0x40013C0C)
+#define EXTI_PR *((volatile uint32_t *) 0x40013C14)
+
+#define GPIOA_MODER *((volatile uint32_t *) 0x40020000)
+#define GPIOA_ODR *((volatile uint32_t *) 0x40020014)
+#define LED_PIN 5
+
+#define GPIOC_MODER *((volatile uint32_t *) 0x40020800)
+#define GPIOC_PUPDR *((volatile uint32_t *) 0x4002080C)
+#define GPIOC_IDR *((volatile uint32_t *) 0x40020810)
+#define BTN_PIN 13
+
+#define TIM2_CR1 *((volatile uint32_t *) 0x40000000)
+#define TIM2_DIER *((volatile uint32_t *) 0x4000000C)
+#define TIM2_SR *((volatile uint32_t *) 0x40000010)
+#define TIM2_PSC *((volatile uint32_t *) 0x40000028)
+#define TIM2_ARR *((volatile uint32_t *) 0x4000002C)
+
+#define STK_CTRL *((volatile uint32_t *) 0xE000E010)
+#define STK_LOAD *((volatile uint32_t *) 0xE000E014)
+#define STK_VAL *((volatile uint32_t *) 0xE000E018)
+
 #if !defined(__SOFT_FP__) && defined(__ARM_FP)
   #warning "FPU is not initialized, but the project is compiling for an FPU. Please initialize the FPU before use."
 #endif
 
+void Init_GPIO(void);
+void Init_Interrupts(void);
+void Init_Timer(void);
+int Read_Button(void);
+void LED_On(void);
+void LED_Off(void);
+
+enum State {
+    OFF,
+    SOLID,
+    BLINK
+};
+
+volatile enum State state = OFF;
+
+volatile uint8_t toggle_state = 0;
+
 int main(void)
 {
-    /* Loop forever */
-	for(;;);
+	Init_GPIO();
+	Init_Interrupts();
+	Init_Timer();
+
+	while (1)
+	{
+		switch(state)
+		{
+			case OFF:
+			{
+				LED_Off();
+				break;
+			}
+			case SOLID:
+			{
+				LED_On();
+				break;
+			}
+			case BLINK:
+			{
+				if (toggle_state)
+				{
+					LED_On();
+				} else
+				{
+					LED_Off();
+				}
+				break;
+			}
+		}
+	}
+}
+
+void Init_GPIO(void)
+{
+	RCC_AHB1ENR |= (1U << 0); // Port A
+	RCC_AHB1ENR |= (1U << 2); // Port C
+	GPIOA_MODER &= ~(0b11U << LED_PIN*2); // 2 bits per pin
+	GPIOA_MODER |= (0b01U << LED_PIN*2);
+
+	GPIOC_MODER &= ~(0b11U << BTN_PIN*2);
+	GPIOC_PUPDR &= ~(0b11U << BTN_PIN*2);
+	GPIOC_PUPDR |= (0b01U << BTN_PIN*2);
+}
+
+void Init_Interrupts(void)
+{
+	RCC_APB2ENR |= (1U << 14); // Enable SYSCFG clock
+	SYSCFG_EXTICR4 &= ~(0b1111U << 4);
+	SYSCFG_EXTICR4 |= (0b0010U << 4); // Configure EXTI13 to use port C
+
+	EXTI_FTSR |= (1U << BTN_PIN); // Triggers interrupt on falling edge
+	EXTI_IMR |= (1U << BTN_PIN);
+
+	NVIC_ISER1 |= (1U << 8); // Enable interrupt in position 40 (EXTI15_10)
+	NVIC_ISER0 |= (1U << 28); // Enable interrupt in position 28 (TIM2)
+}
+
+void Init_Timer(void)
+{
+	RCC_APB1ENR |= (1U << 0); // Enable TIM2 clock
+	TIM2_CR1 |= (1U << 0);
+	TIM2_PSC = 16000 - 1;
+	TIM2_ARR = 1000 - 1;
+	TIM2_DIER |= (1U << 0); // Enable sending interrupts
+}
+
+int Read_Button(void)
+{
+	return (GPIOC_IDR & (1U << BTN_PIN));
+}
+
+void LED_On(void)
+{
+	GPIOA_ODR |= (1U << LED_PIN);
+}
+
+void LED_Off(void)
+{
+	GPIOA_ODR &= ~ (1U << LED_PIN);
+}
+
+void EXTI15_10_IRQHandler(void)
+{
+	if (EXTI_PR & (1U << BTN_PIN))
+	{
+		state = (state + 1) % 3;
+        EXTI_PR |= (1U << BTN_PIN);
+	}
+}
+
+void TIM2_IRQHandler(void)
+{
+	if (TIM2_SR & (1U << 0)) // Check Update Interrupt Flag
+	{
+		TIM2_SR &= ~(1U << 0);
+		if (state == BLINK)
+			{
+				toggle_state = ~toggle_state;
+			}
+	}
 }
